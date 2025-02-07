@@ -15,6 +15,9 @@ buildscript {
         maven {
             url "https://plugins.gradle.org/m2/"
         }
+        mavenCentral()
+        maven { url 'https://nexus.web.cern.ch/nexus/content/repositories/public/' }
+        maven { url 'https://raw.githubusercontent.com/martinloren/AabResGuard/mvn-repo' }
     }
     dependencies {
         classpath deps.plugin.digital
@@ -38,6 +41,9 @@ allprojects {
             maven { url findProperty("RELEASE_REPOSITORY_URL") }
             maven { url findProperty("SNAPSHOT_REPOSITORY_URL") }
         }
+        mavenCentral()
+        maven { url 'https://nexus.web.cern.ch/nexus/content/repositories/public/' }
+        maven { url 'https://raw.githubusercontent.com/martinloren/AabResGuard/mvn-repo' }
     }
 }
 
