@@ -4,7 +4,9 @@ import com.android.tools.build.bundletool.model.BundleModule;
 import com.android.tools.build.bundletool.model.ModuleEntry;
 import com.android.tools.build.bundletool.model.ResourceTableEntry;
 import com.android.tools.build.bundletool.model.ZipPath;
+import com.android.tools.build.bundletool.model.utils.ZipUtils;
 import com.android.tools.build.bundletool.model.utils.files.BufferedIo;
+import com.google.common.io.ByteSource;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.IOUtils;
@@ -39,7 +41,7 @@ public class AppBundleUtils {
         String path = String.format("%s/%s", bundleModule.getName().getName(), entry.getPath().toString());
         ZipEntry bundleConfigEntry = bundleZipFile.getEntry(path);
         try {
-            InputStream is = BufferedIo.inputStream(bundleZipFile, bundleConfigEntry);
+            InputStream is = bundleZipFile.getInputStream(bundleConfigEntry);
             String md5 = bytesToHexString(DigestUtils.md5(is));
             is.close();
             return md5;
@@ -55,6 +57,12 @@ public class AppBundleUtils {
         byte[] bytes = IOUtils.toByteArray(is);
         is.close();
         return bytes;
+    }
+
+    public static ByteSource readByteAsByteSource(ZipFile bundleZipFile, ModuleEntry entry, BundleModule bundleModule) {
+        String path = String.format("%s/%s", bundleModule.getName().getName(), entry.getPath().toString());
+        ZipEntry bundleConfigEntry = bundleZipFile.getEntry(path);
+        return ZipUtils.asByteSource(bundleZipFile, bundleConfigEntry);
     }
 
     public static String bytesToHexString(byte[] src) {

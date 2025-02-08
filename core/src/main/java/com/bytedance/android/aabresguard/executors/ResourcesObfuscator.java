@@ -4,7 +4,6 @@ import com.android.aapt.Resources;
 import com.android.tools.build.bundletool.model.AppBundle;
 import com.android.tools.build.bundletool.model.BundleModule;
 import com.android.tools.build.bundletool.model.BundleModuleName;
-import com.android.tools.build.bundletool.model.InputStreamSuppliers;
 import com.android.tools.build.bundletool.model.ModuleEntry;
 import com.android.tools.build.bundletool.model.ResourceTableEntry;
 import com.android.tools.build.bundletool.model.ZipPath;
@@ -277,7 +276,7 @@ public class ResourcesObfuscator {
             if (obfuscatedPath != null) {
                 ModuleEntry obfuscatedEntry =  ModuleEntry.builder()
                         .setPath(ZipPath.create(obfuscatedPath))
-                        .setContentSupplier(InputStreamSuppliers.fromBytes(AppBundleUtils.readByte(bundleZipFile, entry, bundleModule)))
+                        .setContent(AppBundleUtils.readByteAsByteSource(bundleZipFile, entry, bundleModule))
                         .build();
                 obfuscateEntries.add(obfuscatedEntry);
             } else {
