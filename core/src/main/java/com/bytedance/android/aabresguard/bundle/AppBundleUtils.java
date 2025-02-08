@@ -50,15 +50,6 @@ public class AppBundleUtils {
         }
     }
 
-    public static byte[] readByte(ZipFile bundleZipFile, ModuleEntry entry, BundleModule bundleModule) throws IOException {
-        String path = String.format("%s/%s", bundleModule.getName().getName(), entry.getPath().toString());
-        ZipEntry bundleConfigEntry = bundleZipFile.getEntry(path);
-        InputStream is = BufferedIo.inputStream(bundleZipFile, bundleConfigEntry);
-        byte[] bytes = IOUtils.toByteArray(is);
-        is.close();
-        return bytes;
-    }
-
     public static ByteSource readByteAsByteSource(ZipFile bundleZipFile, ModuleEntry entry, BundleModule bundleModule) {
         String path = String.format("%s/%s", bundleModule.getName().getName(), entry.getPath().toString());
         ZipEntry bundleConfigEntry = bundleZipFile.getEntry(path);
