@@ -16,6 +16,9 @@ apply from: rootProject.file('gradle/publish-shadow.gradle')
 
 [compileJava, compileTestJava, javadoc]*.options*.encoding = 'UTF-8'
 
+sourceCompatibility = versions.java
+targetCompatibility = versions.java
+
 configurations.all {
     resolutionStrategy.dependencySubstitution {
         resolutionStrategy {
@@ -64,6 +67,7 @@ shadowJar {
     baseName = "AabResGuard"
     version = versions[ARTIFACT_ID]
     classifier = ''
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     minimize()
 
@@ -77,6 +81,7 @@ shadowJar {
     exclude 'META-INF/*.SF'
     exclude 'META-INF/*.DSA'
     exclude 'META-INF/*.RSA'
+    exclude 'META-INF/MANIFEST.MF'
 
     relocate 'com.android', 'shadow.bytedance.com.android'
     relocate 'com.google', 'shadow.bytedance.com.google'
