@@ -7,6 +7,7 @@ VERSION=""
 BRANCH="mvn-repo"
 REMOTE_BRANCH="origin/mvn-repo"
 WORKTREE="/private/tmp/AabResGuard-mvn-repo"
+REPO_DIR=""
 COMMIT_MESSAGE=""
 
 usage() {
@@ -19,6 +20,7 @@ create a local commit. The script never pushes.
 
 Options:
   --version VERSION        Override the version from gradle/versions.gradle.
+  --repo-dir PATH         Publish into this Maven repository directory instead of mvn-repo worktree.
   --branch BRANCH         Local Maven repo branch. Default: mvn-repo.
   --remote-branch REF     Remote branch used when creating BRANCH. Default: origin/mvn-repo.
   --worktree PATH         Maven repo worktree path. Default: /private/tmp/AabResGuard-mvn-repo.
@@ -27,10 +29,27 @@ Options:
 EOF
 }
 
+expand_path() {
+    local path="$1"
+    if [[ "$path" == "~" ]]; then
+        printf '%s\n' "$HOME"
+    elif [[ "$path" == "~/"* ]]; then
+        printf '%s/%s\n' "$HOME" "${path#"~/"}"
+    elif [[ "$path" == /* ]]; then
+        printf '%s\n' "$path"
+    else
+        printf '%s/%s\n' "$ROOT_DIR" "$path"
+    fi
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version)
             VERSION="$2"
+            shift 2
+            ;;
+        --repo-dir)
+            REPO_DIR="$2"
             shift 2
             ;;
         --branch)
@@ -78,7 +97,7 @@ if [[ -z "$GROUP_ID" ]]; then
     exit 1
 fi
 
-GROUP_PATH="${GROUP_ID//./\/}"
+GROUP_PATH="$(printf '%s' "$GROUP_ID" | tr . /)"
 CORE_ID="aabresguard-core"
 PLUGIN_ID="aabresguard-plugin"
 M2_ROOT="${HOME}/.m2/repository/${GROUP_PATH}"
@@ -87,15 +106,29 @@ if [[ -z "$COMMIT_MESSAGE" ]]; then
     COMMIT_MESSAGE="Publish ${VERSION} artifacts"
 fi
 
+WORKTREE="$(expand_path "$WORKTREE")"
+if [[ -n "$REPO_DIR" ]]; then
+    REPO_DIR="$(expand_path "$REPO_DIR")"
+fi
+
 echo "Publishing ${GROUP_ID}:aabresguard-*:${VERSION}"
 
-./gradlew clean :core:publishToMavenLocal --no-daemon --stacktrace
+./gradlew clean :core:jar :core:publishToMavenLocal --no-daemon --stacktrace
 
 CORE_M2_DIR="${M2_ROOT}/${CORE_ID}/${VERSION}"
 CORE_M2_JAR="${CORE_M2_DIR}/${CORE_ID}-${VERSION}.jar"
 PLAIN_CORE_JAR="${ROOT_DIR}/core/build/libs/core.jar"
 
+if [[ ! -f "$CORE_M2_JAR" ]]; then
+    echo "Expected published core jar does not exist: $CORE_M2_JAR" >&2
+    exit 1
+fi
+
 if ! jar tf "$CORE_M2_JAR" | grep -q 'com/bytedance/android/aabresguard/commands/ObfuscateBundleCommand.class'; then
+    if [[ ! -f "$PLAIN_CORE_JAR" ]]; then
+        echo "Expected plain core jar does not exist: $PLAIN_CORE_JAR" >&2
+        exit 1
+    fi
     if jar tf "$PLAIN_CORE_JAR" | grep -q 'com/bytedance/android/aabresguard/commands/ObfuscateBundleCommand.class'; then
         echo "Replacing empty/broken published core jar with ${PLAIN_CORE_JAR}."
         cp "$PLAIN_CORE_JAR" "$CORE_M2_JAR"
@@ -115,33 +148,54 @@ for path in "$CORE_M2_DIR" "$PLUGIN_M2_DIR"; do
     fi
 done
 
-if [[ -e "$WORKTREE/.git" ]]; then
-    CURRENT_BRANCH="$(git -C "$WORKTREE" rev-parse --abbrev-ref HEAD)"
-    if [[ "$CURRENT_BRANCH" != "$BRANCH" ]]; then
-        echo "Worktree $WORKTREE is on $CURRENT_BRANCH, expected $BRANCH." >&2
+TARGET_REPO_DIR=""
+COMMIT_REPO_DIR=""
+PUSH_HINT=""
+
+if [[ -n "$REPO_DIR" ]]; then
+    TARGET_REPO_DIR="$REPO_DIR"
+    mkdir -p "$TARGET_REPO_DIR"
+    if git -C "$TARGET_REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        COMMIT_REPO_DIR="$(git -C "$TARGET_REPO_DIR" rev-parse --show-toplevel)"
+        if [[ -n "$(git -C "$COMMIT_REPO_DIR" status --porcelain)" ]]; then
+            echo "Target git repository has uncommitted changes: $COMMIT_REPO_DIR" >&2
+            git -C "$COMMIT_REPO_DIR" status --short >&2
+            exit 1
+        fi
+    fi
+else
+    TARGET_REPO_DIR="$WORKTREE"
+    COMMIT_REPO_DIR="$WORKTREE"
+    PUSH_HINT="git -C \"$WORKTREE\" push origin ${BRANCH}"
+
+    if [[ -e "$WORKTREE/.git" ]]; then
+        CURRENT_BRANCH="$(git -C "$WORKTREE" rev-parse --abbrev-ref HEAD)"
+        if [[ "$CURRENT_BRANCH" != "$BRANCH" ]]; then
+            echo "Worktree $WORKTREE is on $CURRENT_BRANCH, expected $BRANCH." >&2
+            exit 1
+        fi
+    elif [[ -e "$WORKTREE" ]]; then
+        echo "Worktree path exists but is not a git worktree: $WORKTREE" >&2
+        exit 1
+    elif git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+        git worktree add "$WORKTREE" "$BRANCH"
+    else
+        git worktree add "$WORKTREE" -b "$BRANCH" "$REMOTE_BRANCH"
+    fi
+
+    if [[ -n "$(git -C "$WORKTREE" status --porcelain)" ]]; then
+        echo "Maven repo worktree has uncommitted changes: $WORKTREE" >&2
+        git -C "$WORKTREE" status --short >&2
         exit 1
     fi
-elif [[ -e "$WORKTREE" ]]; then
-    echo "Worktree path exists but is not a git worktree: $WORKTREE" >&2
-    exit 1
-elif git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
-    git worktree add "$WORKTREE" "$BRANCH"
-else
-    git worktree add "$WORKTREE" -b "$BRANCH" "$REMOTE_BRANCH"
 fi
 
-if [[ -n "$(git -C "$WORKTREE" status --porcelain)" ]]; then
-    echo "Maven repo worktree has uncommitted changes: $WORKTREE" >&2
-    git -C "$WORKTREE" status --short >&2
-    exit 1
-fi
-
-mkdir -p "$WORKTREE/${GROUP_PATH}/${CORE_ID}" "$WORKTREE/${GROUP_PATH}/${PLUGIN_ID}"
-cp -R "$CORE_M2_DIR" "$WORKTREE/${GROUP_PATH}/${CORE_ID}/"
-cp -R "$PLUGIN_M2_DIR" "$WORKTREE/${GROUP_PATH}/${PLUGIN_ID}/"
+mkdir -p "$TARGET_REPO_DIR/${GROUP_PATH}/${CORE_ID}" "$TARGET_REPO_DIR/${GROUP_PATH}/${PLUGIN_ID}"
+cp -R "$CORE_M2_DIR" "$TARGET_REPO_DIR/${GROUP_PATH}/${CORE_ID}/"
+cp -R "$PLUGIN_M2_DIR" "$TARGET_REPO_DIR/${GROUP_PATH}/${PLUGIN_ID}/"
 
 LAST_UPDATED="$(date -u +%Y%m%d%H%M%S)"
-python3 - "$WORKTREE" "$GROUP_PATH" "$GROUP_ID" "$CORE_ID" "$PLUGIN_ID" "$LAST_UPDATED" <<'PY'
+python3 - "$TARGET_REPO_DIR" "$GROUP_PATH" "$GROUP_ID" "$CORE_ID" "$PLUGIN_ID" "$LAST_UPDATED" <<'PY'
 import os
 import re
 import sys
@@ -198,8 +252,8 @@ for artifact_id in artifact_ids:
 PY
 
 for jar_path in \
-    "$WORKTREE/${GROUP_PATH}/${CORE_ID}/${VERSION}/${CORE_ID}-${VERSION}.jar" \
-    "$WORKTREE/${GROUP_PATH}/${PLUGIN_ID}/${VERSION}/${PLUGIN_ID}-${VERSION}.jar"
+    "$TARGET_REPO_DIR/${GROUP_PATH}/${CORE_ID}/${VERSION}/${CORE_ID}-${VERSION}.jar" \
+    "$TARGET_REPO_DIR/${GROUP_PATH}/${PLUGIN_ID}/${VERSION}/${PLUGIN_ID}-${VERSION}.jar"
 do
     if [[ ! -s "$jar_path" ]]; then
         echo "Jar is missing or empty: $jar_path" >&2
@@ -207,17 +261,27 @@ do
     fi
 done
 
-jar tf "$WORKTREE/${GROUP_PATH}/${CORE_ID}/${VERSION}/${CORE_ID}-${VERSION}.jar" \
+jar tf "$TARGET_REPO_DIR/${GROUP_PATH}/${CORE_ID}/${VERSION}/${CORE_ID}-${VERSION}.jar" \
     | grep -q 'com/bytedance/android/aabresguard/commands/ObfuscateBundleCommand.class'
 
-git -C "$WORKTREE" add "${GROUP_PATH}/${CORE_ID}" "${GROUP_PATH}/${PLUGIN_ID}"
-
-if git -C "$WORKTREE" diff --cached --quiet; then
-    echo "No mvn-repo changes to commit."
+if [[ -z "$COMMIT_REPO_DIR" ]]; then
+    echo "Published Maven artifacts to $TARGET_REPO_DIR"
+    echo "Target directory is not a git repository; no commit was created."
     exit 0
 fi
 
-git -C "$WORKTREE" commit -m "$COMMIT_MESSAGE"
+git -C "$COMMIT_REPO_DIR" add "${TARGET_REPO_DIR}/${GROUP_PATH}/${CORE_ID}" "${TARGET_REPO_DIR}/${GROUP_PATH}/${PLUGIN_ID}"
 
-echo "Created local commit on ${BRANCH}; push manually when ready:"
-echo "  git -C \"$WORKTREE\" push origin ${BRANCH}"
+if git -C "$COMMIT_REPO_DIR" diff --cached --quiet; then
+    echo "No Maven repo changes to commit."
+    exit 0
+fi
+
+git -C "$COMMIT_REPO_DIR" commit -m "$COMMIT_MESSAGE"
+
+echo "Published Maven artifacts to $TARGET_REPO_DIR"
+echo "Created local commit in $COMMIT_REPO_DIR."
+if [[ -n "$PUSH_HINT" ]]; then
+    echo "Push manually when ready:"
+    echo "  $PUSH_HINT"
+fi
